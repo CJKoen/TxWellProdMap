@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Texas Lease Production Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-height app — canvas map left, analyst panel right (stacks on phones). Same family as the Alberta map: caliche ground, oil-amber ramp, gas wells in slate blue outline. */
+:root{
+  --bg:#f0eee9; --panel:#fcfbf8; --ink:#22231f; --muted:#646358; --line:#dcd8cd;
+  --land:#ebe6da; --landline:#b9b19c; --county:#d8d1bf; --water:#dde5e8;
+  --accent:#8a4b12; --accent-ink:#ffffff; --sel:#c2185b;
+  --r0:#f3e6bf; --r1:#e9c46a; --r2:#e08e3c; --r3:#b8432f; --r4:#5c1d2e;
+  --gas:#2f5d8a; --late:#9a9686;
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Barlow","Segoe UI",Helvetica,Arial,sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#151513; --panel:#1c1c19; --ink:#e9e6dc; --muted:#a29f92; --line:#33322d;
+  --land:#20201c; --landline:#5a5749; --county:#2c2b26; --water:#161a1c;
+  --accent:#e0a35a; --accent-ink:#151513; --sel:#ff6fa3;
+  --r0:#3b3422; --r1:#8f6f27; --r2:#d4873a; --r3:#f0b45a; --r4:#fff0b5;
+  --gas:#8fb6e0; --late:#6c6a5f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#151513; --panel:#1c1c19; --ink:#e9e6dc; --muted:#a29f92; --line:#33322d;
+  --land:#20201c; --landline:#5a5749; --county:#2c2b26; --water:#161a1c;
+  --accent:#e0a35a; --accent-ink:#151513; --sel:#ff6fa3;
+  --r0:#3b3422; --r1:#8f6f27; --r2:#d4873a; --r3:#f0b45a; --r4:#fff0b5;
+  --gas:#8fb6e0; --late:#6c6a5f; color-scheme:dark}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+*{box-sizing:border-box}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:grid;grid-template-rows:auto 1fr}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.01em;margin:0;text-wrap:balance}
+header .sub{color:var(--muted);font-size:12.5px}
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-left:auto}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:5px 10px;cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:14px;letter-spacing:.03em;text-transform:uppercase}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.ctrls label{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.ctrls select,.ctrls input[type=search]{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 6px;max-width:230px}
+.ctrls input[type=search]{width:210px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 410px;min-height:0}
+#mapwrap{position:relative;min-height:300px;background:var(--water)}
+#map{position:absolute;inset:0}
+#cv{position:absolute;inset:0;z-index:450;pointer-events:none}
+#tip{position:absolute;z-index:900;pointer-events:none;padding:5px 8px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:5px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);white-space:nowrap}
+#loading{position:absolute;inset:0;z-index:950;display:grid;place-items:center;background:color-mix(in srgb,var(--bg) 80%,transparent);font-family:var(--f-display);font-size:18px;letter-spacing:.03em;color:var(--muted);text-align:center;padding:16px}
+aside{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0;min-width:0}
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border:0;background:none;padding:10px 6px;cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:15px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.pane{overflow:auto;padding:14px 16px 24px;flex:1;min-height:0}
+.eyebrow{font-family:var(--f-display);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h2{font-family:var(--f-display);font-size:21px;font-weight:700;margin:2px 0 2px;line-height:1.15;text-wrap:balance}
+h3{font-family:var(--f-display);font-size:16px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;margin:18px 0 6px}
+.uwi{font-family:var(--f-data);font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin-top:12px}
+.kv div{min-width:0}
+.kv dt{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.kv dd{margin:0;font-family:var(--f-data);font-size:13.5px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.big{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap}
+.big .v{font-family:var(--f-display);font-size:30px;font-weight:700;line-height:1}
+.big .u{font-size:12px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:6px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+td{padding:5px 6px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;font-family:var(--f-data)}
+tr.click{cursor:pointer}
+tr.click:hover td{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+tr.me td{background:color-mix(in srgb,var(--sel) 14%,transparent);font-weight:600}
+.tw{overflow-x:auto}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid currentColor}
+.pill.o{color:var(--r3)} .pill.g{color:var(--gas)} .pill.w{color:var(--muted)}
+.pct{display:flex;align-items:center;gap:8px;margin-top:6px}
+.pct .bar{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--r0),var(--r1),var(--r2),var(--r3),var(--r4));position:relative}
+.pct .tick{position:absolute;top:-4px;width:3px;height:16px;background:var(--ink);border-radius:2px;transform:translateX(-1px)}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+.warn{font-size:12.5px;margin-top:8px;padding:6px 8px;border-left:3px solid var(--late);background:color-mix(in srgb,var(--late) 10%,transparent)}
+.btn{border:1px solid var(--accent);color:var(--accent);background:transparent;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12.5px;font-weight:600}
+.btn.on{background:var(--accent);color:var(--accent-ink)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+svg text{fill:var(--muted);font-family:var(--f-data);font-size:10px}
+.legend{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:800;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px;min-width:210px;max-width:calc(100% - 24px)}
+.legend .ramp{display:flex;height:10px;border-radius:3px;overflow:hidden;margin:5px 0 3px}
+.legend .ramp span{flex:1}
+.legend .lb{display:flex;justify-content:space-between;font-family:var(--f-data);font-size:10.5px;color:var(--muted)}
+.count{font-family:var(--f-data);font-size:12px;color:var(--muted)}
+/* minimal Leaflet core */
+.leaflet-pane,.leaflet-tile,.leaflet-marker-icon,.leaflet-marker-shadow,.leaflet-tile-container,.leaflet-pane>svg,.leaflet-pane>canvas,.leaflet-zoom-box,.leaflet-image-layer,.leaflet-layer{position:absolute;left:0;top:0}
+.leaflet-container{overflow:hidden;font-family:var(--f-body);background:var(--water);-webkit-tap-highlight-color:transparent}
+.leaflet-container .leaflet-overlay-pane svg{max-width:none!important;max-height:none!important}
+.leaflet-pane{z-index:400}.leaflet-overlay-pane{z-index:400}.leaflet-marker-pane{z-index:600}.leaflet-tooltip-pane{z-index:650}.leaflet-popup-pane{z-index:700}
+.leaflet-map-pane canvas{z-index:100}.leaflet-map-pane svg{z-index:200}
+.leaflet-control{position:relative;z-index:800;pointer-events:auto;float:left;clear:both}
+.leaflet-top,.leaflet-bottom{position:absolute;z-index:1000;pointer-events:none}
+.leaflet-top{top:0}.leaflet-right{right:0}.leaflet-bottom{bottom:0}.leaflet-left{left:0}
+.leaflet-right .leaflet-control{float:right;margin-right:10px}.leaflet-top .leaflet-control{margin-top:10px}.leaflet-left .leaflet-control{margin-left:10px}
+.leaflet-interactive{cursor:pointer}
+.leaflet-grab{cursor:grab}.leaflet-dragging .leaflet-grab{cursor:move}
+.leaflet-bar{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel)}
+.leaflet-bar a{display:block;width:30px;height:30px;text-align:center;text-decoration:none;color:var(--ink);font:600 18px/30px var(--f-body);border-bottom:1px solid var(--line)}
+.leaflet-bar a:last-child{border-bottom:0}
+.leaflet-control-attribution{background:color-mix(in srgb,var(--panel) 85%,transparent);font-size:10.5px;padding:1px 6px;color:var(--muted)}
+.town-label{font-family:var(--f-display);font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:.03em;white-space:nowrap;pointer-events:none;text-shadow:0 0 3px var(--land),0 0 3px var(--land)}
+@media (max-width:900px){
+  main{grid-template-columns:1fr;grid-template-rows:58vh auto}
+  aside{border-left:0;border-top:1px solid var(--line)}
+  .ctrls{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div>
+      <h1>Texas oil &amp; gas leases · last 2 years</h1>
+      <div class="sub"><span id="period">Loading…</span> · RRC lease production · <span id="cnt" class="count"></span></div>
+    </div>
+    <div class="ctrls">
+      <div class="seg" role="group" aria-label="Lease type">
+        <button id="t-all" aria-pressed="true" data-t="all">All</button>
+        <button id="t-o" aria-pressed="false" data-t="O">Oil leases</button>
+        <button id="t-g" aria-pressed="false" data-t="G">Gas wells</button>
+      </div>
+      <label for="op">Operator <select id="op"><option value="">All operators</option></select></label>
+      <label for="q"><input type="search" id="q" placeholder="Field name, API or lease ID" aria-label="Search field, API or lease ID"></label>
+      <label for="single"><input type="checkbox" id="single"> Single-well only</label>
+    </div>
+  </header>
+  <main>
+    <div id="mapwrap">
+      <div id="map" aria-label="Map of Texas leases"></div>
+      <canvas id="cv"></canvas>
+      <div id="tip" hidden></div>
+      <div id="loading">Loading 160,000 leases…</div>
+    </div>
+    <aside>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-lease" aria-selected="true" data-tab="lease">Lease</button>
+        <button role="tab" id="tab-ops" aria-selected="false" data-tab="ops">Operators</button>
+        <button role="tab" id="tab-cmp" aria-selected="false" data-tab="cmp">Compare <span id="cmpn"></span></button>
+      </div>
+      <div class="pane" id="pane"></div>
+    </aside>
+  </main>
+</div>
+
+<script id="inline-meta" type="application/octet-stream"></script>
+<script id="inline-arrays" type="application/octet-stream"></script>
+<script id="inline-geo" type="application/json"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt=(x,d=0)=>x==null||!isFinite(x)?'—':Number(x).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const title=s=>String(s||'').toLowerCase().replace(/(^|[\s(\-\/&.,])([a-z])/g,(m,a,b)=>a+b.toUpperCase()).replace(/\b(Llc|Lp|Usa|Ulc|Xto|Eog|Bpx|Cnx|Ii|Iii|Inc)\b/g,w=>w==='Inc'?'Inc':w.toUpperCase()).replace(/\bE&p\b/,'E&P');
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtK=v=>v>=1e6?(v/1e6).toFixed(v>=1e7?0:1)+'M':v>=1000?(v/1000).toFixed(v>=10000?0:1)+'k':Math.round(v);
+function niceMax(x){const p=10**Math.floor(Math.log10(x||1));for(const m of [1,1.5,2,2.5,3,4,5,6,8,10]) if(m*p>=x) return m*p;return 10*p;}
+
+// ---------- data loading (files next to the page, or inlined for the standalone download) ----------
+async function gunzipBytes(bytes){const s=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));return new Response(s).arrayBuffer();}
+function b64bytes(b64){const bin=atob(b64.trim());const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;}
+async function loadGz(inlineId,url){
+  const el=document.getElementById(inlineId);
+  if(el&&el.textContent.trim().length>10) return gunzipBytes(b64bytes(el.textContent));
+  const r=await fetch(url); if(!r.ok) throw new Error(url+' '+r.status);
+  return gunzipBytes(b64bytes(await r.text()));
+}
+async function loadGeo(){
+  const el=document.getElementById('inline-geo');
+  if(el&&el.textContent.trim().length>10) return JSON.parse(el.textContent);
+  return fetch('tx_geo.json').then(r=>r.json());
+}
+
+let D, N, LAT, LON, SER, WOFF, WLAT, WLON, LATI, LATDY, LATDX, WLEASE, MX, MY, WMX, WMY, VAL, BIN, BR=[], VIS, FLD2IDX, LATE=0;
+const state={t:'all',op:'',q:'',single:false,tab:'lease',sel:-1,radius:5,cmp:[],opsBy:'oil'};
+
+// ---------- map ----------
+const map=L.map('map',{zoomControl:true,attributionControl:true,minZoom:5,maxZoom:15,zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,preferCanvas:true}).setView([31.2,-99.3],6);
+map.attributionControl.setPrefix(false).addAttribution('Production &amp; wells: Texas RRC public data · outline: US Census via us-atlas · Leaflet');
+const base=L.layerGroup().addTo(map);
+let GEO=null;
+const CITIES=[['Midland',31.997,-102.078],['Odessa',31.845,-102.368],['Pecos',31.423,-103.493],['El Paso',31.762,-106.485],['San Angelo',31.464,-100.437],['Lubbock',33.578,-101.855],['Amarillo',35.222,-101.831],['Abilene',32.449,-99.733],['Wichita Falls',33.914,-98.493],['Fort Worth',32.755,-97.331],['Dallas',32.777,-96.797],['Tyler',32.351,-95.301],['Austin',30.267,-97.743],['San Antonio',29.424,-98.494],['Houston',29.760,-95.370],['Corpus Christi',27.801,-97.396],['Laredo',27.506,-99.507],['Carrizo Springs',28.522,-99.861]];
+function drawBase(){
+  base.clearLayers(); if(!GEO) return;
+  L.polygon(GEO.outline,{color:css('--landline'),weight:1.3,fillColor:css('--land'),fillOpacity:1,interactive:false}).addTo(base);
+  L.polyline(GEO.lines,{color:css('--county'),weight:.8,interactive:false}).addTo(base);
+  CITIES.forEach(([n,a,o])=>{L.marker([a,o],{icon:L.divIcon({className:'town-label',html:n,iconSize:null,iconAnchor:[-5,7]}),interactive:false}).addTo(base);
+    L.circleMarker([a,o],{radius:2.5,color:css('--muted'),weight:1,fillColor:css('--muted'),fillOpacity:1,interactive:false}).addTo(base);});
+}
+
+// ---------- canvas layer ----------
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d'), tip=document.getElementById('tip');
+let GRID=null, GRIDW=0, GRIDH=0, CELL=12, PX=null, PY=null, raf=0;
+function merc(lat,lon){const x=(lon+180)/360;const s=Math.sin(lat*Math.PI/180);const y=.5-Math.log((1+s)/(1-s))/(4*Math.PI);return [x,y];}
+function sizeCanvas(){const r=cv.parentElement.getBoundingClientRect(),dpr=window.devicePixelRatio||1;cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);cv.style.width=r.width+'px';cv.style.height=r.height+'px';ctx.setTransform(dpr,0,0,dpr,0,0);}
+function schedule(){if(!raf) raf=requestAnimationFrame(()=>{raf=0;draw();});}
+function draw(){
+  if(!D) return;
+  const W=cv.clientWidth,H=cv.clientHeight; ctx.clearRect(0,0,W,H);
+  const z=map.getZoom(), sc=256*2**z, pb=map.getPixelBounds(), ox=pb.min.x, oy=pb.min.y;
+  const rad=[z<=6?1.1:z<=7?1.5:z<=8?2:z<=9?2.6:z<=10?3.3:z<=12?4.2:5][0];
+  const mult=[.75,.85,1,1.2,1.45];
+  // laterals (zoomed in)
+  if(z>=11){ctx.strokeStyle=css('--muted');ctx.globalAlpha=.55;ctx.lineWidth=1;ctx.beginPath();
+    for(let k=0;k<LATI.length;k++){const wi=LATI[k];const li=WLEASE[wi];if(!VIS[li])continue;
+      const x=WMX[wi]*sc-ox,y=WMY[wi]*sc-oy;if(x<-60||y<-60||x>W+60||y>H+60)continue;
+      const sl=(WLAT[wi]+LATDY[k])/1e5, so=(WLON[wi]+LATDX[k])/1e5; const m=merc(sl,so);
+      ctx.moveTo(x,y);ctx.lineTo(m[0]*sc-ox,m[1]*sc-oy);}
+    ctx.stroke();ctx.globalAlpha=1;}
+  // grid for hit testing
+  GRIDW=Math.ceil(W/CELL)+1;GRIDH=Math.ceil(H/CELL)+1;
+  const cnt=new Int32Array(GRIDW*GRIDH+1), cellOf=new Int32Array(N).fill(-1);
+  const cols=['--r0','--r1','--r2','--r3','--r4'].map(css), gas=css('--gas');
+  const paths=[new Path2D(),new Path2D(),new Path2D(),new Path2D(),new Path2D()], gpath=new Path2D();
+  PX=new Float32Array(N);PY=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    if(!VIS[i])continue;
+    const x=MX[i]*sc-ox,y=MY[i]*sc-oy; if(x<-8||y<-8||x>W+8||y>H+8)continue;
+    PX[i]=x;PY[i]=y;
+    const b=BIN[i],r=rad*mult[b];
+    if(r<2) paths[b].rect(x-r,y-r,2*r,2*r); else {paths[b].moveTo(x+r,y);paths[b].arc(x,y,r,0,6.2832);}
+    if(D.t.charCodeAt(i)===71&&z>=9){gpath.moveTo(x+r+.8,y);gpath.arc(x,y,r+.8,0,6.2832);}
+    const cx=Math.min(GRIDW-1,Math.max(0,(x/CELL)|0)),cy=Math.min(GRIDH-1,Math.max(0,(y/CELL)|0));const c=cy*GRIDW+cx;cellOf[i]=c;cnt[c+1]++;
+  }
+  for(let b=0;b<5;b++){ctx.fillStyle=cols[b];ctx.fill(paths[b]);}
+  if(z>=9){ctx.strokeStyle=gas;ctx.lineWidth=1;ctx.stroke(gpath);}
+  for(let c=1;c<cnt.length;c++)cnt[c]+=cnt[c-1];
+  const items=new Int32Array(cnt[cnt.length-1]),fill=cnt.slice();
+  for(let i=0;i<N;i++){const c=cellOf[i];if(c>=0)items[fill[c]++]=i;}
+  GRID={start:cnt,items};
+  // selection, its wells, compare rings
+  const sel=state.sel;
+  state.cmp.forEach(i=>{if(VIS[i]||true){const x=MX[i]*sc-ox,y=MY[i]*sc-oy;ctx.strokeStyle=css('--accent');ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,rad*1.5+5,0,6.2832);ctx.stroke();}});
+  if(sel>=0){
+    const x=MX[sel]*sc-ox,y=MY[sel]*sc-oy,sc2=css('--sel');
+    ctx.strokeStyle=sc2;ctx.lineWidth=1;ctx.setLineDash([3,4]);ctx.beginPath();
+    const mpp=40075016.686*Math.cos(LAT[sel]/1e5*Math.PI/180)/sc;ctx.arc(x,y,state.radius*1000/mpp,0,6.2832);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=sc2;ctx.strokeStyle=sc2;ctx.lineWidth=1.5;
+    for(let w=WOFF[sel];w<WOFF[sel+1];w++){const wx=WMX[w]*sc-ox,wy=WMY[w]*sc-oy;ctx.beginPath();ctx.arc(wx,wy,3,0,6.2832);ctx.stroke();}
+    for(let k=0;k<LATI.length;k++){const wi=LATI[k];if(WLEASE[wi]!==sel)continue;const m=merc((WLAT[wi]+LATDY[k])/1e5,(WLON[wi]+LATDX[k])/1e5);ctx.beginPath();ctx.moveTo(WMX[wi]*sc-ox,WMY[wi]*sc-oy);ctx.lineTo(m[0]*sc-ox,m[1]*sc-oy);ctx.lineWidth=2.5;ctx.stroke();}
+    ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(x,y,rad*1.5+6,0,6.2832);ctx.stroke();
+  }
+}
+function hit(mx,my){
+  if(!GRID) return -1; const cx=(mx/CELL)|0,cy=(my/CELL)|0; let best=-1,bd=100;
+  for(let gy=cy-1;gy<=cy+1;gy++)for(let gx=cx-1;gx<=cx+1;gx++){if(gx<0||gy<0||gx>=GRIDW||gy>=GRIDH)continue;const c=gy*GRIDW+gx;
+    for(let k=GRID.start[c];k<GRID.start[c+1];k++){const i=GRID.items[k];const dx=PX[i]-mx,dy=PY[i]-my,d=dx*dx+dy*dy;if(d<=bd){bd=d;best=i;}}}
+  return best;
+}
+map.on('move zoom resize',schedule);
+map.on('resize',()=>{sizeCanvas();schedule();});
+map.on('mousemove',e=>{const p=e.containerPoint,i=hit(p.x,p.y);
+  if(i<0){tip.hidden=true;map.getContainer().style.cursor='';return;}
+  map.getContainer().style.cursor='pointer';
+  tip.innerHTML=`<b>${esc(title(D.name[i]))}</b> · ${D.t[i]==='G'?'gas well':'oil lease'}<br>${esc(title(D.ops[D.op[i]]))}<br>${fmt(VAL[i])} BOE / producing month${D.t[i]==='O'&&D.act[i]>1?' per well':''}`;
+  tip.hidden=false; const W=cv.clientWidth; tip.style.left=Math.min(p.x+12,W-tip.offsetWidth-6)+'px'; tip.style.top=(p.y+12)+'px';});
+map.on('mouseout',()=>{tip.hidden=true;});
+map.on('click',e=>{const i=hit(e.containerPoint.x,e.containerPoint.y);if(i>=0)select(i,false);});
+
+// ---------- filters ----------
+function applyFilters(){
+  const q=state.q.trim().toUpperCase(), opIdx=state.op===''?-1:+state.op;
+  let fset=null;
+  if(q&&!/^\d/.test(q)&&!/^[OG]-\d/.test(q)){fset=new Uint8Array(D.fields.length);D.fields.forEach((f,j)=>{if(f.toUpperCase().includes(q))fset[j]=1;});}
+  let n=0;
+  for(let i=0;i<N;i++){
+    let v=1;
+    if(state.t!=='all'&&D.t[i]!==state.t)v=0;
+    else if(opIdx>=0&&D.op[i]!==opIdx)v=0;
+    else if(state.single&&D.wells[i]!==1)v=0;
+    else if(fset&&!fset[D.fld[i]])v=0;
+    VIS[i]=v;n+=v;
+  }
+  document.getElementById('cnt').textContent=`${fmt(n)} of ${fmt(N)} leases shown`;
+  schedule();
+}
+function findQuery(q){
+  q=q.trim().toUpperCase().replace(/[\s-]/g,'');
+  if(/^[OG]\d{8}$/.test(q)){const id=q[0]+'-'+q.slice(1,3)+'-'+q.slice(3);const i=D.id.indexOf(id);if(i>=0){select(i,true);return true;}}
+  let api=q.replace(/^42(?=\d{8})/,''); if(/^\d{8}$/.test(api)){
+    let pos=-1; while((pos=D.wapi.indexOf(api,pos+1))>=0){if(pos%8===0)break;}
+    if(pos>=0){const w=pos/8;select(WLEASE[w],true,w);return true;}
+  }
+  return false;
+}
+
+// ---------- charts ----------
+function bars(series,{h=125,late=true}={}){
+  const wdt=370,pl=42,pb=18,pt=8,n=D.months.length,k=series.length;
+  const mx=Math.max(1,...series.flatMap(s=>s.v)),nice=niceMax(mx),bw=(wdt-pl-6)/n,iw=bw*.8/k;
+  let g='';for(let i=0;i<=3;i++){const y=pt+(h-pt-pb)*(1-i/3);g+=`<line x1="${pl}" x2="${wdt-4}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${pl-5}" y="${y+3}" text-anchor="end">${fmtK(nice*i/3)}</text>`;}
+  if(late&&LATE>0){const x0=pl+(n-LATE)*bw;g+=`<rect x="${x0}" y="${pt}" width="${LATE*bw}" height="${h-pt-pb}" fill="var(--late)" opacity=".12"/>`;}
+  series.forEach((s,j)=>s.v.forEach((v,i)=>{const bh=(h-pt-pb)*v/nice,x=pl+i*bw+bw*.1+j*iw;const lt=late&&i>=n-LATE;
+    g+=`<rect x="${x.toFixed(1)}" y="${(h-pb-bh).toFixed(1)}" width="${Math.max(.6,iw-.8).toFixed(1)}" height="${Math.max(0,bh).toFixed(1)}" fill="${s.c}" opacity="${lt?.5:1}"><title>${s.name||''} ${D.mlab[i]}: ${fmt(v)}</title></rect>`;}));
+  for(let i=0;i<n;i+=3) g+=`<text x="${pl+i*bw+bw/2}" y="${h-4}" text-anchor="middle">${D.mshort[i]}</text>`;
+  return `<svg viewBox="0 0 ${wdt} ${h}" width="100%" role="img" aria-label="Monthly chart">${g}</svg>`;
+}
+function series(i){const n=D.months.length,o=new Array(n);for(let m=0;m<n;m++){const q=SER[i*n+m];o[m]=q?Math.expm1(q/D.logq):0;}return o;}
+function median(a){if(!a.length)return null;const b=Float64Array.from(a).sort();const m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2;}
+function km(i,j){const R=6371,t=Math.PI/180,a1=LAT[i]/1e5*t,a2=LAT[j]/1e5*t,dl=a2-a1,dn=(LON[j]-LON[i])/1e5*t;const x=Math.sin(dl/2)**2+Math.cos(a1)*Math.cos(a2)*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
+
+// ---------- panes ----------
+const typePill=i=>D.t[i]==='G'?'<span class="pill g">Gas well</span>':(D.wells[i]===1?'<span class="pill o">Oil lease · 1 well</span>':`<span class="pill o">Oil lease · ${D.wells[i]} wells</span>`);
+function paneLease(){
+  const i=state.sel;
+  if(i<0){
+    const n=D.months.length, oil=D.state_monthly_oil.map((v,k)=>v/D.days[k]/1000), gas=D.state_monthly_gas.map((v,k)=>v/D.days[k]/1e6);
+    return `<div class="eyebrow">How to use</div><h2>Click any lease on the map</h2>
+    <p class="note">Each dot is a producing lease placed at the centre of its wells. Colour and size show average BOE per producing month, divided by the lease's active wells. Gas wells (blue ring when zoomed in) and single-well oil leases are true well-level numbers; multi-well oil leases are a per-well average, because Texas reports oil production by lease.</p>
+    <p class="note">Zoom past level 11 to see horizontal laterals. Search a field name (e.g. <i>Spraberry</i>, <i>Eagleford</i>, <i>Wolfcamp</i>), a 10-digit API, or a lease ID.</p>
+    <p><button class="btn" id="demo">Show an example lease</button></p>
+    <h3>Statewide oil + condensate, thousand bbl/d</h3>${bars([{v:oil,c:css('--r3'),name:'Mbbl/d'}])}
+    <h3>Statewide gas, Bcf/d</h3>${bars([{v:gas,c:css('--gas'),name:'Bcf/d'}])}
+    ${LATE?`<p class="warn">The last ${LATE} months (shaded) are still being filled in by late RRC reports, so they read low.</p>`:''}`;
+  }
+  const s=series(i), tot=s.reduce((a,b)=>a+b,0), per=D.act[i]>1&&D.t[i]==='O';
+  const same=FLD2IDX[D.fld[i]], nb=[];
+  for(const j of same){if(j===i)continue;const d=km(i,j);if(d<=state.radius)nb.push([j,d]);}
+  const all=[[i,0],...nb].sort((a,b)=>VAL[b[0]]-VAL[a[0]]);
+  const rank=all.findIndex(x=>x[0]===i)+1,pct=all.length>1?Math.round(100*(all.length-rank)/(all.length-1)):null,med=median(nb.map(x=>VAL[x[0]]));
+  const gor=D.oil[i]>0?D.gas[i]*1000/D.oil[i]:null, inCmp=state.cmp.includes(i);
+  const wells=[];for(let w=WOFF[i];w<WOFF[i+1]&&wells.length<12;w++)wells.push('42-'+D.wapi.substr(w*8,3)+'-'+D.wapi.substr(w*8+3,5));
+  return `<div class="eyebrow">${typePill(i)} · ${esc(title(D.counties[D.cty[i]]))} County</div>
+  <h2>${esc(title(D.ops[D.op[i]]))}</h2>
+  <div class="uwi">${esc(D.name[i])} · lease ${esc(D.id[i])}</div>
+  <div class="uwi">${esc(D.fields[D.fld[i]])}</div>
+  <div class="big"><div><div class="v">${fmt(VAL[i])}</div><div class="u">avg BOE / producing month${per?' per active well':''}</div></div>
+  <div><div class="v">${fmt(tot/D.total_days,1)}</div><div class="u">lease BOE / day, 2-yr avg</div></div></div>
+  ${bars([{v:s,c:D.t[i]==='G'?css('--gas'):css('--r3'),name:'Lease BOE'}])}
+  <div class="row"><button class="btn ${inCmp?'on':''}" id="pin">${inCmp?'Pinned to compare':'Pin to compare'}</button></div>
+  <dl class="kv">
+   <div><dt>Wells (active / total)</dt><dd>${D.act[i]} / ${D.wells[i]}</dd></div>
+   <div><dt>Months producing</dt><dd>${D.on[i]} of ${D.months.length}</dd></div>
+   <div><dt>Oil</dt><dd>${fmt(D.oil[i])} bbl</dd></div>
+   <div><dt>Condensate</dt><dd>${fmt(D.cond[i])} bbl</dd></div>
+   <div><dt>Gas</dt><dd>${fmt(D.gas[i])} mcf</dd></div>
+   <div><dt>GOR</dt><dd>${fmt(gor)} scf/bbl</dd></div>
+  </dl>
+  <p class="note">API: ${wells.map(esc).join(', ')}${D.wells[i]>12?` and ${D.wells[i]-12} more`:''}</p>
+  ${D.t[i]==='O'&&D.wells[i]===1&&VAL[i]>60000?`<p class="warn">This is very high for a single oil well. The RRC lists one well on this lease, but more wells may be reporting into it; check the lease's well list before using it as a well-level benchmark.</p>`:''}
+  ${per?`<p class="note">This oil lease reports one combined volume for ${D.wells[i]} wells. The figure above divides it by ${D.act[i]} active wells; individual wells on it may differ a lot.</p>`:''}
+  <h3>Same-field neighbours</h3>
+  <div class="row"><label for="rad" class="note" style="margin:0">Radius</label>
+   <select id="rad">${[2,5,10,20].map(r=>`<option value="${r}" ${r===state.radius?'selected':''}>${r} km</option>`).join('')}</select>
+   <span class="note" style="margin:0">${nb.length} leases in ${esc(title(D.fields[D.fld[i]]))}</span></div>
+  ${nb.length?`<div class="pct"><span class="note" style="margin:0">P${pct}</span><div class="bar"><div class="tick" style="left:${pct}%"></div></div></div>
+  <p class="note">Ranks ${rank} of ${all.length}. Neighbour median ${fmt(med)} BOE/month per well, so this lease is at ${med?fmt(100*VAL[i]/med):'—'}% of the local median.</p>
+  <div class="tw"><table><thead><tr><th>Operator</th><th class="n">BOE/mo/well</th><th class="n">Wells</th><th class="n">km</th></tr></thead><tbody>
+  ${all.slice(0,40).map(([j,d])=>`<tr class="click ${j===i?'me':''}" data-i="${j}"><td>${esc(title(D.ops[D.op[j]])).slice(0,26)}</td><td class="n">${fmt(VAL[j])}</td><td class="n">${D.wells[j]}</td><td class="n">${fmt(d,1)}</td></tr>`).join('')}
+  </tbody></table></div>${all.length>40?`<p class="note">Showing top 40 of ${fmt(all.length)}.</p>`:''}`
+  :`<p class="note">No other leases in this field within ${state.radius} km. Try a larger radius.</p>`}
+  <p class="note">RRC fields usually name the producing formation, so same-field neighbours are the closest public stand-in for "same zone". Completion design, landing depth and rock quality aren't in public data; those are the inputs to load alongside this in Mercury.</p>`;
+}
+function paneOps(){
+  const by=state.opsBy, list=by==='oil'?D.top_oil:D.top_gas;
+  const agg=new Map();
+  for(let i=0;i<N;i++){const o=D.ops[D.op[i]];if(!list.includes(o))continue;let a=agg.get(o);if(!a)agg.set(o,a={oil:0,cond:0,gas:0,l:0,w:0,v:[]});a.oil+=D.oil[i];a.cond+=D.cond[i];a.gas+=D.gas[i];a.l++;a.w+=D.wells[i];if(D.wells[i]===1)a.v.push(VAL[i]);}
+  const rows=list.map((o,k)=>({o,k:k+1,...agg.get(o)}));
+  return `<div class="eyebrow">${D.period} · ${fmt(D.total_days)} days</div><h2>Top 20 operators by ${by==='oil'?'crude oil':'gas'}</h2>
+  <div class="seg" role="group" aria-label="Rank by" style="margin:6px 0 8px"><button data-by="oil" aria-pressed="${by==='oil'}">Oil</button><button data-by="gas" aria-pressed="${by==='gas'}">Gas</button></div>
+  <div class="tw"><table><thead><tr><th class="n">#</th><th>Operator</th><th class="n">${by==='oil'?'Oil bbl/d':'Gas mcf/d'}</th><th class="n">Leases</th><th class="n">Median 1-well BOE/mo</th></tr></thead><tbody>
+  ${rows.map(r=>{const oi=D.ops.indexOf(r.o);return `<tr class="click ${String(oi)===state.op?'me':''}" data-op="${oi}"><td class="n">${r.k}</td><td>${esc(title(r.o))}</td><td class="n">${fmt((by==='oil'?r.oil:r.gas)/D.total_days)}</td><td class="n">${fmt(r.l)}</td><td class="n">${fmt(median(r.v))}</td></tr>`;}).join('')}
+  </tbody></table></div>
+  <p class="note">Operator is the operator of record with the RRC in the latest month, so acquired companies can still appear under their own filing names. The median uses only single-well leases and gas wells, which are true well-level figures.</p>`;
+}
+function paneCmp(){
+  if(!state.cmp.length) return `<div class="eyebrow">Compare</div><h2>Pin up to 6 leases</h2><p class="note">Select a lease on the map, then choose “Pin to compare”. Pinned leases appear here with their monthly production side by side.</p>`;
+  const pal=['--r3','--gas','--accent','--r2','--sel','--muted'].map(css);
+  return `<div class="eyebrow">Compare · ${state.cmp.length} leases</div><h2>Monthly lease BOE</h2>${bars(state.cmp.map((i,k)=>({v:series(i),c:pal[k],name:D.id[i]})),{h:150})}
+  <div class="tw"><table><thead><tr><th></th><th>Lease</th><th class="n">BOE/mo/well</th><th class="n">Wells</th><th class="n">GOR</th><th></th></tr></thead><tbody>
+  ${state.cmp.map((i,k)=>`<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${pal[k]}"></span></td><td class="click" data-i="${i}" style="cursor:pointer"><div style="font-family:var(--f-data);font-size:11.5px">${esc(D.id[i])}</div><div class="note" style="margin:0">${esc(title(D.ops[D.op[i]])).slice(0,24)}</div></td><td class="n">${fmt(VAL[i])}</td><td class="n">${D.wells[i]}</td><td class="n">${fmt(D.oil[i]>0?D.gas[i]*1000/D.oil[i]:null)}</td><td><button class="btn" data-unpin="${i}" aria-label="Remove ${esc(D.id[i])}">×</button></td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+function renderPane(){
+  const p=document.getElementById('pane');
+  p.innerHTML=state.tab==='lease'?paneLease():state.tab==='ops'?paneOps():paneCmp();
+  document.querySelectorAll('.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===state.tab));
+  document.getElementById('cmpn').textContent=state.cmp.length?`(${state.cmp.length})`:'';
+  p.querySelectorAll('[data-i]').forEach(r=>r.onclick=()=>select(+r.dataset.i,true));
+  p.querySelectorAll('tr[data-op]').forEach(r=>r.onclick=()=>{state.op=state.op===r.dataset.op?'':r.dataset.op;document.getElementById('op').value=state.op;applyFilters();renderPane();});
+  p.querySelectorAll('[data-by]').forEach(b=>b.onclick=()=>{state.opsBy=b.dataset.by;renderPane();});
+  p.querySelectorAll('[data-unpin]').forEach(b=>b.onclick=()=>{state.cmp=state.cmp.filter(x=>x!==+b.dataset.unpin);schedule();renderPane();});
+  const pin=document.getElementById('pin');if(pin)pin.onclick=()=>{const i=state.sel;if(state.cmp.includes(i))state.cmp=state.cmp.filter(x=>x!==i);else{state.cmp.push(i);if(state.cmp.length>6)state.cmp.shift();}schedule();renderPane();};
+  const rad=document.getElementById('rad');if(rad)rad.onchange=()=>{state.radius=+rad.value;schedule();renderPane();};
+  const demo=document.getElementById('demo');if(demo)demo.onclick=()=>{const c=[];for(let i=0;i<N;i++){if(D.t[i]==='O'&&D.wells[i]===1&&D.on[i]>=18&&D.fields[D.fld[i]].includes('SPRABERRY'))c.push(i);}c.sort((a,b)=>VAL[a]-VAL[b]);select(c.length?c[Math.floor(c.length*.9)]:N-1,true);};
+}
+function select(i,fly){
+  state.sel=i;state.tab='lease';
+  if(fly) map.setView([LAT[i]/1e5,LON[i]/1e5],Math.max(map.getZoom(),11));
+  schedule();renderPane();
+}
+
+// ---------- wiring ----------
+document.querySelectorAll('header .seg button').forEach(b=>b.onclick=()=>{state.t=b.dataset.t;document.querySelectorAll('header .seg button').forEach(x=>x.setAttribute('aria-pressed',x===b));applyFilters();});
+document.getElementById('op').onchange=e=>{state.op=e.target.value;applyFilters();renderPane();};
+document.getElementById('single').onchange=e=>{state.single=e.target.checked;applyFilters();};
+const qel=document.getElementById('q');
+qel.addEventListener('keydown',e=>{if(e.key==='Enter'){if(findQuery(qel.value)){return;}state.q=qel.value;applyFilters();}});
+qel.addEventListener('search',()=>{if(!qel.value){state.q='';applyFilters();}});
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;renderPane();});
+const rethemes=()=>{drawBase();schedule();if(D)renderPane();};
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',rethemes);
+new MutationObserver(rethemes).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+window.addEventListener('resize',()=>{sizeCanvas();schedule();});
+
+(async()=>{
+  try{
+    const [mb,ab,geo]=await Promise.all([loadGz('inline-meta','tx_meta.gz.b64.txt'),loadGz('inline-arrays','tx_arrays.gz.b64.txt'),loadGeo()]);
+    GEO=geo; drawBase();
+    D=JSON.parse(new TextDecoder().decode(mb)); N=D.n;
+    const T={int32:Int32Array,uint16:Uint16Array,int16:Int16Array};
+    const arr=k=>{const [off,dt,n]=D.layout[k];return new T[dt](ab,off,n);};
+    LAT=arr('lat');LON=arr('lon');SER=arr('ser');WOFF=arr('woff');WLAT=arr('wlat');WLON=arr('wlon');LATI=arr('lati');LATDY=arr('latdy');LATDX=arr('latdx');
+    const nw=WLAT.length; WLEASE=new Int32Array(nw); for(let i=0;i<N;i++) for(let w=WOFF[i];w<WOFF[i+1];w++) WLEASE[w]=i;
+    MX=new Float64Array(N);MY=new Float64Array(N);for(let i=0;i<N;i++){const m=merc(LAT[i]/1e5,LON[i]/1e5);MX[i]=m[0];MY[i]=m[1];}
+    WMX=new Float64Array(nw);WMY=new Float64Array(nw);for(let w=0;w<nw;w++){const m=merc(WLAT[w]/1e5,WLON[w]/1e5);WMX[w]=m[0];WMY[w]=m[1];}
+    VAL=new Float64Array(N);for(let i=0;i<N;i++){const tot=D.oil[i]+D.cond[i]+D.gas[i]/6;VAL[i]=D.on[i]?tot/D.on[i]/Math.max(1,D.act[i]):0;}
+    const sorted=Float64Array.from(VAL).sort();BR=[.2,.4,.6,.8].map(q=>sorted[Math.floor(q*(N-1))]);
+    BIN=new Uint8Array(N);for(let i=0;i<N;i++){let b=0;while(b<4&&VAL[i]>BR[b])b++;BIN[i]=b;}
+    FLD2IDX=Array.from({length:D.fields.length},()=>[]);for(let i=0;i<N;i++)FLD2IDX[D.fld[i]].push(i);
+    VIS=new Uint8Array(N).fill(1);
+    D.mlab=D.months.map(m=>MON[+m.slice(5)-1]+' '+m.slice(0,4));D.mshort=D.months.map(m=>MON[+m.slice(5)-1]+' '+m.slice(2,4));
+    D.period=D.mshort[0]+' – '+D.mshort[D.mshort.length-1];
+    // months still being filled in: trailing months well below the prior year's median
+    const so=D.state_monthly_oil.map((v,k)=>v/D.days[k]);
+    for(let k=so.length-1;k>=12;k--){const prev=so.slice(k-12,k).slice().sort((a,b)=>a-b);const med=(prev[5]+prev[6])/2;if(so[k]<.97*med)LATE++;else break;}
+    document.getElementById('period').textContent=D.mlab[0]+' – '+D.mlab[D.mlab.length-1];
+    const sel=document.getElementById('op');
+    const seen=new Set();[...D.top_oil,...D.top_gas].forEach(o=>{if(seen.has(o))return;seen.add(o);const oi=D.ops.indexOf(o);sel.insertAdjacentHTML('beforeend',`<option value="${oi}">${esc(title(o))}</option>`);});
+    const lg=L.control({position:'bottomleft'});lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');
+      d.innerHTML=`<div class="eyebrow">Avg BOE per producing month, per well</div><div class="ramp">${['--r0','--r1','--r2','--r3','--r4'].map(c=>`<span style="background:var(${c})"></span>`).join('')}</div><div class="lb"><span>0</span>${BR.map(b=>`<span>${fmtK(b)}</span>`).join('')}<span>max</span></div><div class="note" style="margin-top:4px">Quintiles of ${fmt(N)} leases · blue ring = gas well</div>`;
+      L.DomEvent.disableClickPropagation(d);return d;};lg.addTo(map);
+    document.getElementById('loading').hidden=true;
+    sizeCanvas();applyFilters();renderPane();
+  }catch(err){
+    document.getElementById('loading').textContent='The map data didn’t load ('+err.message+'). Reload the page to try again; it needs a current browser.';
+  }
+})();
+</script>
+
+</body>
+</html>
